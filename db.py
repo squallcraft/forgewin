@@ -1696,6 +1696,46 @@ def get_historical_match_seasons() -> List[int]:
         return [r[0] for r in c.fetchall()]
 
 
+_TEAM_SUFFIX_RE = None
+
+def _core_team_name(name: str) -> str:
+    """
+    Extrae el nombre "popular" del equipo quitando prefijos y sufijos futbolísticos comunes.
+    'Real Madrid CF' → 'Real Madrid', 'AC Pisa 1909' → 'Pisa', 'Sport Lisboa e Benfica' → 'Benfica'
+    """
+    import re
+    n = name.strip()
+    n = re.sub(r"^(AC|ACF|AFC|SC|FC|AS|SS|SV|SD|UD|RC|RB|SL|GD|CD|VfB|VfL|IF|BK|FK|SK|TSV|FSV|MSV|KSC|BSC|Sporting|Sport\s+Lisboa\s+e)\s+", "", n, flags=re.IGNORECASE)
+    n = re.sub(r"\s+(FC|CF|AC|SC|SD|UD|RC|Calcio|1\d{3}|\d{4})\s*$", "", n, flags=re.IGNORECASE)
+    n = n.strip()
+    return n if len(n) >= 3 else name.strip()
+
+
+def _team_name_candidates(name: str) -> list:
+    """
+    Genera una lista de variantes del nombre para fuzzy matching, de más específica a más general.
+    'Birmingham City FC' → ['Birmingham City FC', 'Birmingham City', 'Birmingham']
+    'Real Madrid CF'     → ['Real Madrid CF', 'Real Madrid']
+    """
+    seen = []
+    def _add(n):
+        n = n.strip()
+        if n and n not in seen:
+            seen.append(n)
+    import re
+    _add(name)
+    core = _core_team_name(name)
+    _add(core)
+    # Quitar también palabras de ubicación/tipo comunes como City, United, Athletic
+    core2 = re.sub(r"\s+(City|United|Athletic|Atletico|County|Town|Rovers|Wanderers|Albion|Rangers|Villa|Palace|Forest|Wednesday|Thursday|Saturday)\s*$", "", core, flags=re.IGNORECASE).strip()
+    _add(core2)
+    # Primera palabra si tiene >= 5 caracteres
+    parts = core2.split() if core2 else core.split()
+    if parts and len(parts[0]) >= 5:
+        _add(parts[0])
+    return seen
+
+
 def get_historical_matches_for_team(
     team_id: Optional[int] = None,
     team_name: Optional[str] = None,
@@ -1704,41 +1744,80 @@ def get_historical_matches_for_team(
 ) -> List[Dict[str, Any]]:
     """
     Partidos históricos donde el equipo participó (local o visitante).
-    Busca por team_id (API-Sports) o por team_name (CSV). Orden: más reciente primero.
+    Busca por team_id (API-Sports) o por team_name (CSV/exact, luego fuzzy).
+    Orden: más reciente primero.
     """
+    _SEL = """SELECT fixture_id, date, league_id, home_team_id, away_team_id,
+                     home_goals, away_goals, season, home_team_name, away_team_name
+              FROM historical_matches"""
+
+    def _build_output(rows, tid, tname):
+        out = []
+        for r in rows:
+            d = dict(r)
+            home_id = d.get("home_team_id")
+            is_home = (tid is not None and home_id == tid) or (
+                tname and d.get("home_team_name", "").lower() == tname.lower()
+            )
+            # fuzzy fallback: si no coincide exacto, heurística por posición
+            if not is_home and tname:
+                hn = d.get("home_team_name", "").lower()
+                core = _core_team_name(tname).lower()
+                is_home = core in hn or tname.lower() in hn
+            gf = d["home_goals"] if is_home else d["away_goals"]
+            ga = d["away_goals"] if is_home else d["home_goals"]
+            out.append({"date": d["date"], "goals_for": gf, "goals_against": ga,
+                        "league_id": d["league_id"], "season": d["season"]})
+        return out
+
     with get_connection() as conn:
         c = conn.cursor()
         if team_id is not None:
             c.execute(
-                """SELECT fixture_id, date, league_id, home_team_id, away_team_id,
-                          home_goals, away_goals, season, home_team_name, away_team_name
-                   FROM historical_matches
-                   WHERE (home_team_id = ? OR away_team_id = ?)
-                   ORDER BY date DESC LIMIT ?""",
+                f"{_SEL} WHERE (home_team_id = ? OR away_team_id = ?) ORDER BY date DESC LIMIT ?",
                 (team_id, team_id, last_n),
             )
-        elif team_name and league_id:
-            c.execute(
-                """SELECT fixture_id, date, league_id, home_team_id, away_team_id,
-                          home_goals, away_goals, season, home_team_name, away_team_name
-                   FROM historical_matches
-                   WHERE league_id = ? AND (home_team_name = ? OR away_team_name = ?)
-                   ORDER BY date DESC LIMIT ?""",
-                (league_id, team_name, team_name, last_n),
-            )
-        else:
-            return []
-        rows = c.fetchall()
-    out = []
-    for r in rows:
-        d = dict(r)
-        home_id = d.get("home_team_id")
-        away_id = d.get("away_team_id")
-        is_home = (team_id is not None and home_id == team_id) or (team_name and d.get("home_team_name") == team_name)
-        gf = d["home_goals"] if is_home else d["away_goals"]
-        ga = d["away_goals"] if is_home else d["home_goals"]
-        out.append({"date": d["date"], "goals_for": gf, "goals_against": ga, "league_id": d["league_id"], "season": d["season"]})
-    return out
+            rows = c.fetchall()
+            if rows:
+                return _build_output(rows, team_id, team_name)
+            # fallback por nombre si team_id no encuentra nada
+            if not team_name:
+                return []
+
+        if team_name and league_id:
+            candidates = _team_name_candidates(team_name)
+            # Primero exacto con liga, luego fuzzy con liga, luego sin liga
+            for candidate in candidates:
+                pattern = f"%{candidate}%"
+                # Exacto con liga
+                c.execute(
+                    f"{_SEL} WHERE league_id = ? AND (home_team_name = ? OR away_team_name = ?) ORDER BY date DESC LIMIT ?",
+                    (league_id, candidate, candidate, last_n),
+                )
+                rows = c.fetchall()
+                if rows:
+                    return _build_output(rows, None, team_name)
+                # ILIKE con liga
+                c.execute(
+                    f"{_SEL} WHERE league_id = ? AND (home_team_name ILIKE ? OR away_team_name ILIKE ?) ORDER BY date DESC LIMIT ?",
+                    (league_id, pattern, pattern, last_n),
+                )
+                rows = c.fetchall()
+                if rows:
+                    return _build_output(rows, None, team_name)
+
+            # Fallback sin liga (league_id puede diferir entre fuentes)
+            for candidate in candidates:
+                pattern = f"%{candidate}%"
+                c.execute(
+                    f"{_SEL} WHERE (home_team_name ILIKE ? OR away_team_name ILIKE ?) ORDER BY date DESC LIMIT ?",
+                    (pattern, pattern, last_n),
+                )
+                rows = c.fetchall()
+                if rows:
+                    return _build_output(rows, None, team_name)
+
+        return []
 
 
 def get_historical_matches_for_team_with_stats(
@@ -1859,31 +1938,64 @@ def get_historical_h2h(
     league_id: Optional[str] = None,
     last_n: int = 8,
 ) -> List[Dict[str, Any]]:
-    """Enfrentamientos directos desde historical_matches. Por IDs o por nombres (league_id requerido)."""
+    """Enfrentamientos directos desde historical_matches. Por IDs o por nombres. Fuzzy fallback si exacto falla."""
+    _SEL = "SELECT date, home_team_name, away_team_name, home_goals, away_goals FROM historical_matches"
+
+    def _rows_to_h2h(rows):
+        return [{"date": r[0], "home_team_name": r[1], "away_team_name": r[2],
+                 "home_goals": r[3], "away_goals": r[4]} for r in rows]
+
     with get_connection() as conn:
         c = conn.cursor()
         if home_id is not None and away_id is not None:
             c.execute(
-                """SELECT date, home_team_name, away_team_name, home_goals, away_goals FROM historical_matches
-                   WHERE ((home_team_id = ? AND away_team_id = ?) OR (home_team_id = ? AND away_team_id = ?))
-                   ORDER BY date DESC LIMIT ?""",
+                f"{_SEL} WHERE ((home_team_id = ? AND away_team_id = ?) OR (home_team_id = ? AND away_team_id = ?)) ORDER BY date DESC LIMIT ?",
                 (home_id, away_id, away_id, home_id, last_n),
             )
-        elif home_name and away_name and league_id:
+            rows = c.fetchall()
+            if rows:
+                return _rows_to_h2h(rows)
+            if not (home_name and away_name):
+                return []
+            # fallback a nombre si IDs no coinciden
+
+        if home_name and away_name:
+            # 1. Exacto con liga
+            if league_id:
+                c.execute(
+                    f"{_SEL} WHERE league_id = ? AND ((home_team_name = ? AND away_team_name = ?) OR (home_team_name = ? AND away_team_name = ?)) ORDER BY date DESC LIMIT ?",
+                    (league_id, home_name, away_name, away_name, home_name, last_n),
+                )
+                rows = c.fetchall()
+                if rows:
+                    return _rows_to_h2h(rows)
+
+            # 2. Exacto sin liga
             c.execute(
-                """SELECT date, home_team_name, away_team_name, home_goals, away_goals FROM historical_matches
-                   WHERE league_id = ? AND (
-                     (home_team_name = ? AND away_team_name = ?) OR (home_team_name = ? AND away_team_name = ?)
-                   ) ORDER BY date DESC LIMIT ?""",
-                (league_id, home_name, away_name, away_name, home_name, last_n),
+                f"{_SEL} WHERE (home_team_name = ? AND away_team_name = ?) OR (home_team_name = ? AND away_team_name = ?) ORDER BY date DESC LIMIT ?",
+                (home_name, away_name, away_name, home_name, last_n),
             )
-        else:
+            rows = c.fetchall()
+            if rows:
+                return _rows_to_h2h(rows)
+
+            # 3. Fuzzy cascada con candidatos de nombre
+            home_cands = _team_name_candidates(home_name)
+            away_cands = _team_name_candidates(away_name)
+            for hc in home_cands:
+                for ac in away_cands:
+                    hp = f"%{hc}%"
+                    ap = f"%{ac}%"
+                    c.execute(
+                        f"{_SEL} WHERE (home_team_name ILIKE ? AND away_team_name ILIKE ?) OR (home_team_name ILIKE ? AND away_team_name ILIKE ?) ORDER BY date DESC LIMIT ?",
+                        (hp, ap, ap, hp, last_n),
+                    )
+                    rows = c.fetchall()
+                    if rows:
+                        return _rows_to_h2h(rows)
             return []
-        rows = c.fetchall()
-    return [
-        {"date": r[0], "home_team_name": r[1], "away_team_name": r[2], "home_goals": r[3], "away_goals": r[4]}
-        for r in rows
-    ]
+
+        return []
 
 
 def get_historical_matches_for_team_from_master_checked(
