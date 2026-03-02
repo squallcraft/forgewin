@@ -57,15 +57,7 @@ if _DB_MODE == "pg":
 
         def execute(self, sql: str, params=None):
             sql_pg = sql.replace("?", "%s")
-            # SAVEPOINTs: evitan que un error individual aborte toda la transacción PG
-            self._c.execute("SAVEPOINT _fw_sp")
-            try:
-                self._c.execute(sql_pg, _pg_clean_params(params))
-                self._c.execute("RELEASE SAVEPOINT _fw_sp")
-            except Exception:
-                self._c.execute("ROLLBACK TO SAVEPOINT _fw_sp")
-                self._c.execute("RELEASE SAVEPOINT _fw_sp")
-                raise
+            self._c.execute(sql_pg, _pg_clean_params(params))
             if sql_pg.lstrip().upper().startswith("INSERT"):
                 try:
                     self._c.execute("SELECT LASTVAL()")
@@ -121,13 +113,12 @@ if _DB_MODE == "pg":
     @contextmanager
     def get_connection():
         raw = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.DictCursor)
+        # autocommit=True: cada statement es su propia transacción atómica.
+        # Evita que un error en una query aborte el resto del bloque (PG behavior).
+        raw.autocommit = True
         conn = _PGConnection(raw)
         try:
             yield conn
-            raw.commit()
-        except Exception:
-            raw.rollback()
-            raise
         finally:
             raw.close()
 
