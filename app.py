@@ -291,12 +291,15 @@ def _trigger_auto_download_once(flag_key: str) -> None:
     st.session_state[flag_key] = False
     js = """
     <script>
-    (function() {
-        setTimeout(function() {
-            var a = document.querySelector('a[download]');
-            if (a) a.click();
-        }, 600);
-    })();
+    (function tryClick(attempt) {
+        var doc = (window.parent && window.parent.document) ? window.parent.document : document;
+        var links = doc.querySelectorAll('a[download], [data-testid="stDownloadButton"] a');
+        if (links.length > 0) {
+            links[links.length - 1].click();
+        } else if (attempt < 8) {
+            setTimeout(function() { tryClick(attempt + 1); }, 400);
+        }
+    })(0);
     </script>
     """
     st_components_html(js, height=0)
@@ -665,7 +668,7 @@ with st.sidebar:
     # ── ANÁLISIS ──────────────────────────────────────────────────────────────
     st.caption("**ANÁLISIS**")
     _nav_btn("📅 Partidos de hoy", "Partidos del día (top 10 ligas)")
-    _nav_btn("🔥 Dale con todo", "V3")
+    _nav_btn("🔥 Dale con todo con esteroides", "V3")
 
     if is_admin:
         _nav_btn("🔁 V2 (clásico)", "V2")
@@ -2099,15 +2102,18 @@ with main_col:
 
                 # Un solo botón: Dale con todo! (Paso 1 Alfred, Paso 2 Reginald, Paso 3 Propuesta General 1+2)
                 import time
+                _COST_DALE = 2  # créditos por partido
                 balance = int(st.session_state.current_user.get("credits_balance") or 0) if st.session_state.current_user and st.session_state.current_user.get("role") != "admin" else 999
                 can_run_all = (
                     n_sel > 0
                     and GEMINI_API_KEY
                     and _has_any_credit(st.session_state.current_user)
                 )
-                if n_sel > 0 and balance > 0 and n_sel > balance and st.session_state.current_user and st.session_state.current_user.get("role") != "admin":
-                    faltantes = n_sel - balance
-                    st.warning(f"Tienes **{balance} créditos**. Selecciona solo hasta {balance} partidos, o el sistema analizará **{balance} partidos elegidos aleatoriamente** de los {n_sel} seleccionados.")
+                _costo_total = n_sel * _COST_DALE
+                _partidos_posibles = balance // _COST_DALE if _COST_DALE else balance
+                if n_sel > 0 and balance > 0 and _costo_total > balance and st.session_state.current_user and st.session_state.current_user.get("role") != "admin":
+                    faltantes = _costo_total - balance
+                    st.warning(f"Tienes **{balance} créditos** ({_partidos_posibles} partidos a {_COST_DALE} cr/partido). Selecciona hasta {_partidos_posibles} partidos o compra más créditos.")
                     st.caption("O compra los créditos faltantes para analizar todos:")
                     _render_buy_credits_ui(faltantes, "buy_cr_dale_falt")
                 if st.session_state.current_user and st.session_state.current_user.get("role") == "admin" and n_sel > 0:
@@ -2188,8 +2194,8 @@ with main_col:
                             for line in activity_log:
                                 st.caption(line)
                             st.caption(f"[{elapsed_final}s] Listo.")
-                        _deduct_credits_and_refresh(len(ids_to_analyze))
-                        st.success("Dale con todo completado. Opción 1 (Alfred), Opción 2 (Reginald) y Propuesta General 1+2 listas.")
+                        _deduct_credits_and_refresh(len(ids_to_analyze) * _COST_DALE)
+                        st.success("Dale con todo completado. Propuesta General 1+2 lista.")
                         st.rerun()
                     except Exception as e:
                         import traceback
@@ -2209,10 +2215,8 @@ with main_col:
                     elif not GEMINI_API_KEY:
                         st.info("Configura la API key de Reginald (Gemini) en .env para usar «Dale con todo!».")
 
-                col_grok, col_gemini = st.columns(2)
-
                 def _render_mini_table(selected_fids, stats_by_fixture, fixture_to_match, col_ctx, title):
-                    """Muestra el mismo recuadro (tabla de métricas) con datos del modelo."""
+                    """Muestra recuadro de métricas por partido."""
                     if not selected_fids or not stats_by_fixture:
                         col_ctx.caption("Sin datos. Genera la propuesta para ver la tabla.")
                         return
@@ -2244,38 +2248,6 @@ with main_col:
                         row_cols[10].write(f"{btts:.0%}" if btts is not None else "—")
                         row_cols[11].write(f"{over25:.0%}" if over25 is not None else "—")
                         row_cols[12].write(str(vb))
-
-                with col_grok:
-                    st.subheader("Opción 1: Alfred")
-                    if n_sel > 0 and not st.session_state.current_user.get("grok_enabled"):
-                        st.caption("Las propuestas generadas aquí usan Alfred en segundo plano.")
-                    pid_g = st.session_state.get("last_proposal_id_grok")
-                    if pid_g:
-                        prop = get_proposal(pid_g)
-                        if prop:
-                            st.caption(f"ID: #{prop.get('proposal_number', pid_g)}")
-                            grok_stats_prop = prop.get("grok_stats") or {}
-                            _render_mini_table(st.session_state.selected_fixture_ids, grok_stats_prop, fixture_to_match, col_grok, "Datos por partido (Alfred)")
-                            with st.expander("Análisis completo (Alfred)", expanded=False):
-                                st.markdown(prop.get("grok_analysis") or "")
-
-                with col_gemini:
-                    st.subheader("Opción 2: Reginald")
-                    if n_sel > 0 and not GEMINI_API_KEY:
-                        st.info("Añade la API key de Reginald (GEMINI_API_KEY) en .env.")
-                    pid_m = st.session_state.get("last_proposal_id_gemini")
-                    if pid_m:
-                        prop = get_proposal(pid_m)
-                        if prop:
-                            st.caption(f"ID: #{prop.get('proposal_number', pid_m)}")
-                            gemini_stats = prop.get("grok_stats") or {}
-                            analysis_text = (prop.get("grok_analysis") or "").strip()
-                            if not gemini_stats and analysis_text.startswith("Error 429"):
-                                st.warning("Límite de la API de Reginald (429). Espera 1–2 minutos y vuelve a pulsar «Dale con todo».")
-                            else:
-                                _render_mini_table(st.session_state.selected_fixture_ids, gemini_stats, fixture_to_match, col_gemini, "Datos por partido (Reginald)")
-                            with st.expander("Análisis completo (Reginald)", expanded=bool(analysis_text.startswith("Error 429"))):
-                                st.markdown(analysis_text or "")
 
                 st.markdown("---")
                 st.subheader("Propuesta General 1+2")
@@ -2602,14 +2574,17 @@ with main_col:
                 return "\n\n".join(parts) if parts else None
 
             import time as _time
+            _COST_PRO = 3  # créditos por partido (Dale con Todo Pro)
             balance_v3 = int(st.session_state.current_user.get("credits_balance") or 0) if st.session_state.current_user and st.session_state.current_user.get("role") != "admin" else 999
             can_run_v3 = n_sel_v3 > 0 and GEMINI_API_KEY and _has_any_credit(st.session_state.current_user)
-            if n_sel_v3 > 0 and balance_v3 > 0 and n_sel_v3 > balance_v3 and st.session_state.current_user and st.session_state.current_user.get("role") != "admin":
-                st.warning(f"Tienes **{balance_v3} créditos**. Selecciona hasta {balance_v3} partidos o compra más.")
-                _render_buy_credits_ui(n_sel_v3 - balance_v3, "buy_cr_v3")
+            _costo_total_v3 = n_sel_v3 * _COST_PRO
+            _partidos_posibles_v3 = balance_v3 // _COST_PRO if _COST_PRO else balance_v3
+            if n_sel_v3 > 0 and balance_v3 > 0 and _costo_total_v3 > balance_v3 and st.session_state.current_user and st.session_state.current_user.get("role") != "admin":
+                st.warning(f"Tienes **{balance_v3} créditos** ({_partidos_posibles_v3} partidos a {_COST_PRO} cr/partido). Selecciona hasta {_partidos_posibles_v3} partidos o compra más créditos.")
+                _render_buy_credits_ui(_costo_total_v3 - balance_v3, "buy_cr_v3")
             if st.session_state.current_user and st.session_state.current_user.get("role") == "admin" and n_sel_v3 > 0:
                 st.caption("🧪 Modo admin: pruebas sin descontar créditos.")
-            if can_run_v3 and st.button("🔥 Analizar con IA (V3 + Propuesta Final)", type="primary", key="dale_con_todo_v3"):
+            if can_run_v3 and st.button("🔥 Dale con Todo Pro", type="primary", key="dale_con_todo_v3"):
                 ids_to_analyze_v3 = _effective_ids_to_analyze(st.session_state["v3_selected_fixture_ids"], st.session_state.current_user)
                 match_data_v3 = _get_match_data_v3(ids_to_analyze_v3)
                 start_time_v3 = _time.time()
@@ -2661,8 +2636,8 @@ with main_col:
                     with log_placeholder_v3.container():
                         for line in activity_log_v3:
                             st.caption(line)
-                    _deduct_credits_and_refresh(len(ids_to_analyze_v3))
-                    st.success("Análisis V3 completado. Revisa Opción 1, Opción 2 y Propuesta General 1+2 abajo.")
+                    _deduct_credits_and_refresh(len(ids_to_analyze_v3) * _COST_PRO)
+                    st.success("Dale con Todo Pro completado. Propuesta General 1+2 lista.")
                     st.rerun()
                 except Exception as e_v3:
                     import traceback
@@ -2681,7 +2656,6 @@ with main_col:
                 elif not GEMINI_API_KEY:
                     st.info("Configura GEMINI_API_KEY en .env para usar el análisis Pro (V3).")
 
-            col_grok_v3, col_gemini_v3 = st.columns(2)
             def _render_mini_table_v3(selected_fids, stats_by_fixture, fixture_to_match, col_ctx, title):
                 if not selected_fids or not stats_by_fixture:
                     col_ctx.caption("Sin datos. Genera la propuesta para ver la tabla.")
@@ -2714,28 +2688,9 @@ with main_col:
                     row_cols[10].write(f"{btts:.0%}" if btts is not None else "—")
                     row_cols[11].write(f"{over25:.0%}" if over25 is not None else "—")
                     row_cols[12].write(str(vb))
-            with col_grok_v3:
-                st.subheader("Opción 1: Alfred (V3)")
-                pid_g_v3 = st.session_state.get("v3_last_proposal_id_grok")
-                if pid_g_v3:
-                    prop_v3 = get_proposal(pid_g_v3)
-                    if prop_v3:
-                        st.caption(f"ID: #{prop_v3.get('proposal_number', pid_g_v3)}")
-                        _render_mini_table_v3(st.session_state["v3_selected_fixture_ids"], prop_v3.get("grok_stats") or {}, fixture_to_match_v3, col_grok_v3, "Datos por partido (Alfred)")
-                        with st.expander("Análisis completo (Alfred)", expanded=False):
-                            st.markdown(prop_v3.get("grok_analysis") or "")
-            with col_gemini_v3:
-                st.subheader("Opción 2: Reginald (V3)")
-                pid_m_v3 = st.session_state.get("v3_last_proposal_id_gemini")
-                if pid_m_v3:
-                    prop_v3 = get_proposal(pid_m_v3)
-                    if prop_v3:
-                        st.caption(f"ID: #{prop_v3.get('proposal_number', pid_m_v3)}")
-                        _render_mini_table_v3(st.session_state["v3_selected_fixture_ids"], prop_v3.get("grok_stats") or {}, fixture_to_match_v3, col_gemini_v3, "Datos por partido (Reginald)")
-                        with st.expander("Análisis completo (Reginald)", expanded=False):
-                            st.markdown(prop_v3.get("grok_analysis") or "")
+
             st.markdown("---")
-            st.subheader("Propuesta General 1+2 (V3)")
+            st.subheader("Propuesta General 1+2 (Pro)")
             consensus_v3 = st.session_state.get("v3_consensus_result")
             consensus_fids_v3 = st.session_state.get("v3_consensus_match_ids") or []
             if consensus_v3 and consensus_v3.get("analysis") is not None:
