@@ -577,6 +577,37 @@ def init_db() -> None:
         c.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id)")
 
+        # ── Sistema de referidos ───────────────────────────────────────────────
+        c.execute(f"""
+            CREATE TABLE IF NOT EXISTS referral_codes (
+                id {_PK_AUTO},
+                user_id INTEGER NOT NULL,
+                code TEXT UNIQUE NOT NULL,
+                active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TEXT NOT NULL
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_referral_codes_user ON referral_codes(user_id)")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_referral_codes_code ON referral_codes(code)")
+
+        c.execute(f"""
+            CREATE TABLE IF NOT EXISTS referral_usage (
+                id {_PK_AUTO},
+                referred_user_id INTEGER NOT NULL,
+                referrer_user_id INTEGER NOT NULL,
+                code_used TEXT NOT NULL,
+                purchase_amount INTEGER NOT NULL,
+                commission_paid INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_referral_usage_referred ON referral_usage(referred_user_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_referral_usage_referrer ON referral_usage(referrer_user_id)")
+
+        # Columna referral_code en mp_payments para rastrear qué código se usó en cada pago
+        _try_add_column(c, "mp_payments", "referral_code", "TEXT")
+
 
 # ── Sesiones de usuario ──────────────────────────────────────────────────────
 
@@ -1174,6 +1205,7 @@ def upsert_mp_payment(
     status: str = "pending",
     mp_payment_id: Optional[str] = None,
     mp_preference_id: Optional[str] = None,
+    referral_code: Optional[str] = None,
 ) -> None:
     """Inserta o actualiza un pago MP. external_reference debe ser único por intención de pago."""
     now = datetime.utcnow().isoformat()
@@ -1182,14 +1214,14 @@ def upsert_mp_payment(
     with get_connection() as conn:
         c = conn.cursor()
         c.execute(
-            """INSERT INTO mp_payments (user_id, mp_payment_id, mp_preference_id, external_reference, tier, credits, amount, currency_id, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """INSERT INTO mp_payments (user_id, mp_payment_id, mp_preference_id, external_reference, tier, credits, amount, currency_id, status, referral_code, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(external_reference) DO UPDATE SET
                    mp_payment_id = CASE WHEN ? != '' THEN ? ELSE mp_payments.mp_payment_id END,
                    mp_preference_id = CASE WHEN ? != '' THEN ? ELSE mp_payments.mp_preference_id END,
                    status = ?,
                    updated_at = ?""",
-            (user_id, pid, pref, external_reference, tier, credits, amount, currency_id, status, now, now, pid, pid, pref, pref, status, now),
+            (user_id, pid, pref, external_reference, tier, credits, amount, currency_id, status, referral_code, now, now, pid, pid, pref, pref, status, now),
         )
 
 

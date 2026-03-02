@@ -231,9 +231,11 @@ def create_preference_for_credits(
     payer_email: str,
     back_url: Optional[str] = None,
     notification_url: Optional[str] = None,
+    referral_code: Optional[str] = None,
 ) -> Tuple[Optional[str], str]:
     """
-    Crea una preferencia para comprar N créditos sueltos a 1000 CLP cada uno.
+    Crea una preferencia para comprar N créditos.
+    Si referral_code es válido, aplica 30% descuento en el precio total.
     Devuelve (init_point_url, error_message).
     """
     if not is_configured():
@@ -245,8 +247,22 @@ def create_preference_for_credits(
     if not sdk:
         return None, "No se pudo inicializar el SDK de Mercado Pago."
 
+    # Precio con o sin descuento de referido
+    from referrals import REFERRAL_PRICE_CLP, NORMAL_PACK_PRICE_CLP, validate_referral_code
+    referral_code_clean = (referral_code or "").upper().strip()
+    has_referral = False
+    if referral_code_clean:
+        ok_ref, _ = validate_referral_code(referral_code_clean, user_id)
+        has_referral = ok_ref
+
     unit_price = PRICE_PER_CREDIT_CLP
-    total = unit_price * num_credits
+    if has_referral and num_credits == 10:
+        # Descuento solo aplica al pack de 10 créditos (precio estándar 20.000)
+        total = REFERRAL_PRICE_CLP
+    else:
+        total = unit_price * num_credits
+        referral_code_clean = ""  # no guardar código si no aplica descuento
+
     ext_ref = f"fw-credits-{user_id}-{num_credits}-{uuid.uuid4().hex[:8]}"
     back = back_url or f"{BASE_URL.rstrip('/')}?payment=pack&status=ok"
     if not back.startswith("http"):
@@ -288,6 +304,7 @@ def create_preference_for_credits(
                     currency_id="CLP",
                     status="pending",
                     mp_preference_id=str(body.get("id", "")),
+                    referral_code=referral_code_clean or None,
                 )
                 return init_point, ""
         err = resp.get("response") or resp
@@ -344,7 +361,6 @@ def process_payment_notification(payment_id: str) -> Tuple[bool, str]:
             tier = str(record.get("tier", "base"))
             ok, msg = add_credits(user_id, credits, tier)
             if ok:
-                now = datetime.utcnow().isoformat()
                 upsert_mp_payment(
                     user_id=user_id,
                     external_reference=ext_ref,
@@ -354,7 +370,21 @@ def process_payment_notification(payment_id: str) -> Tuple[bool, str]:
                     status="approved",
                     mp_payment_id=payment_id,
                     mp_preference_id=record.get("mp_preference_id"),
+                    referral_code=record.get("referral_code"),
                 )
+                # Procesar comisión de referido si corresponde
+                ref_code = record.get("referral_code")
+                if ref_code:
+                    try:
+                        from referrals import process_referral_after_payment
+                        r_ok, r_msg = process_referral_after_payment(
+                            referred_user_id=user_id,
+                            code=ref_code,
+                            paid_amount=int(record.get("amount", 0)),
+                        )
+                        logger.info("referrals post-pago: %s — %s", r_ok, r_msg)
+                    except Exception as re:
+                        logger.exception("Error procesando comisión referido: %s", re)
                 return True, f"Créditos añadidos: {credits}. {msg}"
             return False, msg
         elif status in ("pending", "in_process", "in_mediation"):

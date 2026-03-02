@@ -213,6 +213,7 @@ def _render_buy_credits_ui(num_credits: int, key_prefix: str) -> None:
         return
     try:
         from payment_controller import is_configured, create_preference_for_credits, PRICE_PER_CREDIT_CLP, MIN_CREDITS_PURCHASE
+        from referrals import validate_referral_code, REFERRAL_PRICE_CLP, NORMAL_PACK_PRICE_CLP, user_has_used_referral
         if not is_configured():
             st.caption("Pagos no configurados. Contacta al administrador.")
             return
@@ -223,14 +224,46 @@ def _render_buy_credits_ui(num_credits: int, key_prefix: str) -> None:
     user_email = user.get("email") or ""
     if not user_email:
         user_email = st.text_input("Tu email (para Mercado Pago)", key=f"{key_prefix}_email", placeholder="correo@ejemplo.com")
+
+    # Campo de código de referido (solo si no ha usado uno antes)
+    referral_code = ""
+    referral_valid = False
+    if not user_has_used_referral(user["id"]):
+        ref_default = st.session_state.get("pending_referral_code", "")
+        referral_input = st.text_input(
+            "¿Tienes un código de referido? (opcional)",
+            value=ref_default,
+            key=f"{key_prefix}_ref_code",
+            placeholder="Ej: TOMAS2024",
+            max_chars=12,
+        )
+        if referral_input:
+            ok_ref, msg_ref = validate_referral_code(referral_input.upper().strip(), user["id"])
+            if ok_ref:
+                st.success(msg_ref)
+                referral_code = referral_input.upper().strip()
+                referral_valid = True
+            else:
+                st.warning(f"Código no válido: {msg_ref}")
+
     if user_email:
-        total_clp = num_credits * PRICE_PER_CREDIT_CLP
-        label = f"Comprar {num_credits} créditos — ${total_clp:,.0f} CLP (IVA incl.)".replace(",", ".")
+        # Precio con o sin descuento
+        if referral_valid and num_credits == 10:
+            total_clp = REFERRAL_PRICE_CLP
+            price_label = f"${total_clp:,} CLP (30% desc. por referido)".replace(",", ".")
+        else:
+            total_clp = num_credits * PRICE_PER_CREDIT_CLP
+            price_label = f"${total_clp:,} CLP (IVA incl.)".replace(",", ".")
+        label = f"Comprar {num_credits} créditos — {price_label}"
         if st.button(label, key=f"{key_prefix}_btn", type="primary"):
             _sess_tok = st.query_params.get(_SESSION_PARAM, "")
             _base = os.getenv("FORGEWIN_BASE_URL", "https://forgewin.cl")
             _back = f"{_base}?payment=pack&status=ok&t={_sess_tok}" if _sess_tok else None
-            init_point, err = create_preference_for_credits(user["id"], num_credits, user_email, back_url=_back)
+            init_point, err = create_preference_for_credits(
+                user["id"], num_credits, user_email,
+                back_url=_back,
+                referral_code=referral_code or None,
+            )
             if init_point:
                 st.link_button("💳 Ir a pagar con Mercado Pago", init_point, key=f"{key_prefix}_link")
             else:
@@ -447,6 +480,11 @@ if st.session_state.current_user is None:
     except Exception as _e:
         log.warning("Session token restore error: %s", _e)
 
+# ── Pre-cargar código de referido desde URL (?ref=CODIGO) ─────────────────────
+_ref_from_url = st.query_params.get("ref", "")
+if _ref_from_url and "pending_referral_code" not in st.session_state:
+    st.session_state["pending_referral_code"] = _ref_from_url.upper().strip()
+
 # ── Procesar retorno de Mercado Pago (fallback si el webhook falló) ────────────
 _mp_qp = st.query_params
 if _mp_qp.get("status") == "approved" and _mp_qp.get("payment_id"):
@@ -618,15 +656,17 @@ with st.sidebar:
             "V3",
             "Historial de propuestas",
             "Buscar propuesta",
+            "Mis Referidos",
             "Administración",
         ]
     else:
-        # MVP: 5 secciones para usuarios
+        # MVP: secciones para usuarios
         mode_options = [
             "Partidos del día (top 10 ligas)",
             "V3",
             "Historial de propuestas",
             "Conoce los planes",
+            "Mis Referidos",
         ]
 
     # Handle pending mode requests (set by league buttons etc.)
@@ -676,6 +716,7 @@ with st.sidebar:
     st.divider()
     st.caption("**MIS ANÁLISIS**")
     _nav_btn("📋 Historial", "Historial de propuestas")
+    _nav_btn("🤝 Mis Referidos", "Mis Referidos")
     if is_admin:
         _nav_btn("🔎 Buscar por ID", "Buscar propuesta")
 
@@ -3407,6 +3448,105 @@ with main_col:
                     st.session_state["view_proposal_id"] = None
                     st.session_state.pop("came_from_historial", None)
                     st.rerun()
+
+    # ---------- Mis Referidos ----------
+    elif mode == "Mis Referidos":
+        from referrals import (
+            generate_referral_code, get_vlogger_dashboard,
+            REFERRAL_PRICE_CLP, NORMAL_PACK_PRICE_CLP, REFERRAL_COMMISSION_CLP,
+            get_all_pending_commissions, mark_commission_paid,
+        )
+        u_ref = st.session_state.current_user
+        uid_ref = u_ref["id"]
+        uname_ref = u_ref.get("username", "")
+
+        st.title("🤝 Mis Referidos")
+        st.caption("Comparte tu código, gana comisiones cuando tus referidos compran su primer pack.")
+        st.divider()
+
+        # ── Generar código ────────────────────────────────────────────────────
+        dash = get_vlogger_dashboard(uid_ref)
+        if not dash["has_code"]:
+            st.info("Aún no tienes un código de referido. Genera uno para empezar a ganar comisiones.")
+            if st.button("✨ Generar mi código de referido", type="primary"):
+                ok_gen, result_gen = generate_referral_code(uid_ref, uname_ref)
+                if ok_gen:
+                    st.success(f"¡Código generado: **{result_gen}**!")
+                    st.rerun()
+                else:
+                    st.error(result_gen)
+        else:
+            code_ref = dash["code"]
+            link_ref = dash["referral_link"]
+
+            # ── Panel principal ───────────────────────────────────────────────
+            col_code, col_link = st.columns([1, 2])
+            with col_code:
+                st.markdown("**Tu código**")
+                st.markdown(
+                    f"<div style='background:#1c1c1e;border:2px solid #ff6b35;border-radius:10px;"
+                    f"padding:1rem 1.5rem;font-size:1.8rem;font-weight:700;letter-spacing:0.1em;"
+                    f"text-align:center;color:#ff6b35'>{code_ref}</div>",
+                    unsafe_allow_html=True,
+                )
+            with col_link:
+                st.markdown("**Enlace de referido**")
+                st.code(link_ref, language=None)
+                st.caption("Compártelo en tus redes y videos. Cuando alguien lo use, ganas comisión.")
+
+            st.divider()
+
+            # ── Métricas ──────────────────────────────────────────────────────
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Referidos", dash["referral_count"])
+            c2.metric("Comisión total", f"${dash['total_commission']:,} CLP".replace(",", "."))
+            c3.metric("Pendiente de pago", f"${dash['pending_commission']:,} CLP".replace(",", "."))
+            c4.metric("Ya pagado", f"${dash['paid_commission']:,} CLP".replace(",", "."))
+
+            st.divider()
+
+            # ── Cómo funciona ─────────────────────────────────────────────────
+            with st.expander("ℹ️ ¿Cómo funciona?", expanded=False):
+                st.markdown(f"""
+- Tu referido ingresa el código **{code_ref}** al comprar su primer pack de créditos.
+- Paga **${REFERRAL_PRICE_CLP:,} CLP** en vez de ${NORMAL_PACK_PRICE_CLP:,} CLP (30% de descuento).
+- Tú recibes **${REFERRAL_COMMISSION_CLP:,} CLP de comisión** (se registra como pendiente).
+- Las comisiones pendientes se pagan por transferencia una vez al mes.
+- Solo aplica en la **primera compra** del usuario referido.
+                """.replace(",", "."))
+
+            # ── Lista de referidos ────────────────────────────────────────────
+            st.subheader("Historial de referidos")
+            if dash["usages"]:
+                for usage in dash["usages"]:
+                    fecha = (usage.get("created_at") or "")[:10]
+                    estado_color = "🟢" if usage["status"] == "paid" else "🟡"
+                    st.markdown(
+                        f"{estado_color} **{usage.get('referred_username', '—')}** — "
+                        f"compró ${usage['purchase_amount']:,} CLP — "
+                        f"comisión ${usage['commission_paid']:,} CLP — "
+                        f"estado: **{usage['status']}** — {fecha}".replace(",", ".")
+                    )
+            else:
+                st.info("Aún no tienes referidos. ¡Comparte tu enlace!")
+
+        # ── Panel admin: comisiones pendientes ────────────────────────────────
+        if u_ref.get("role") == "admin":
+            st.divider()
+            st.subheader("⚙️ Admin — Comisiones pendientes")
+            pending_all = get_all_pending_commissions()
+            if pending_all:
+                for p in pending_all:
+                    col_a, col_b = st.columns([4, 1])
+                    col_a.markdown(
+                        f"**{p['vlogger_username']}** ← referido por **{p['referred_username']}** — "
+                        f"${p['commission_paid']:,} CLP — {(p.get('created_at') or '')[:10]}".replace(",", ".")
+                    )
+                    if col_b.button("Marcar pagada", key=f"pay_comm_{p['id']}"):
+                        mark_commission_paid(p["id"])
+                        st.rerun()
+            else:
+                st.success("No hay comisiones pendientes.")
 
     # ---------- Administración ----------
     elif mode == "Administración":
