@@ -68,6 +68,9 @@ from db import (
     normalize_team_name,
     get_pending_team_aliases,
     resolve_team_alias,
+    create_user_session,
+    get_session_user,
+    delete_user_session,
 )
 from auth import (
     verify_password,
@@ -103,16 +106,10 @@ try:
 except ImportError:
     build_enriched_context_for_matches = None
 
-# ── Persistencia de sesión con cookies ────────────────────────────────────────
-try:
-    import extra_streamlit_components as stx
-    _cookie_mgr = stx.CookieManager(key="fw_cookies")
-    _all_cookies: dict = _cookie_mgr.get_all() or {}
-    _COOKIES_OK = True
-except Exception:
-    _cookie_mgr = None
-    _all_cookies = {}
-    _COOKIES_OK = False
+# ── Persistencia de sesión vía token en URL query param ───────────────────────
+# st.query_params persiste entre reloads y sobrevive la redirección de MP
+# cuando incluimos ?t=TOKEN en el back_url.
+_SESSION_PARAM = "t"
 
 
 def _normalize_and_dedupe_matches(matches: list) -> list:
@@ -230,7 +227,10 @@ def _render_buy_credits_ui(num_credits: int, key_prefix: str) -> None:
         total_clp = num_credits * PRICE_PER_CREDIT_CLP
         label = f"Comprar {num_credits} créditos — ${total_clp:,.0f} CLP (IVA incl.)".replace(",", ".")
         if st.button(label, key=f"{key_prefix}_btn", type="primary"):
-            init_point, err = create_preference_for_credits(user["id"], num_credits, user_email)
+            _sess_tok = st.query_params.get(_SESSION_PARAM, "")
+            _base = os.getenv("FORGEWIN_BASE_URL", "https://forgewin.cl")
+            _back = f"{_base}?payment=pack&status=ok&t={_sess_tok}" if _sess_tok else None
+            init_point, err = create_preference_for_credits(user["id"], num_credits, user_email, back_url=_back)
             if init_point:
                 st.link_button("💳 Ir a pagar con Mercado Pago", init_point, key=f"{key_prefix}_link")
             else:
@@ -422,24 +422,27 @@ def _ensure_session_state():
 
 _ensure_session_state()
 
-# ── Restaurar sesión desde cookie (sobrevive reloads y redirect de MP) ────────
-if st.session_state.current_user is None and _COOKIES_OK:
+# ── Restaurar sesión desde token en URL (persiste en reload y redirect MP) ────
+if st.session_state.current_user is None:
     try:
-        _saved_username = _all_cookies.get("fw_user")
-        if _saved_username:
-            _u_cookie = get_user_by_username(_saved_username)
-            if _u_cookie:
+        _tok = st.query_params.get(_SESSION_PARAM, "")
+        if _tok:
+            _u_tok = get_session_user(_tok)
+            if _u_tok:
                 st.session_state.current_user = {
-                    "id": _u_cookie["id"],
-                    "username": _u_cookie["username"],
-                    "email": _u_cookie.get("email") or "",
-                    "role": _u_cookie.get("role", "user"),
-                    "grok_enabled": bool(_u_cookie.get("grok_enabled")),
-                    "tier": _u_cookie.get("tier") or "base",
-                    "credits_balance": int(_u_cookie.get("credits_balance") or 0),
+                    "id": _u_tok["id"],
+                    "username": _u_tok["username"],
+                    "email": _u_tok.get("email") or "",
+                    "role": _u_tok.get("role", "user"),
+                    "grok_enabled": bool(_u_tok.get("grok_enabled")),
+                    "tier": _u_tok.get("tier") or "base",
+                    "credits_balance": int(_u_tok.get("credits_balance") or 0),
                 }
+            else:
+                # Token inválido/expirado — limpiamos el param
+                st.query_params.pop(_SESSION_PARAM, None)
     except Exception as _e:
-        log.warning("Cookie restore error: %s", _e)
+        log.warning("Session token restore error: %s", _e)
 
 # ── Procesar retorno de Mercado Pago (fallback si el webhook falló) ────────────
 _mp_qp = st.query_params
@@ -503,12 +506,11 @@ if not st.session_state.current_user:
                             "role": u.get("role", "user"), "grok_enabled": bool(u.get("grok_enabled")),
                             "tier": u.get("tier") or "base", "credits_balance": int(u.get("credits_balance") or 0),
                         }
-                        if _COOKIES_OK:
-                            try:
-                                from datetime import timedelta as _td
-                                _cookie_mgr.set("fw_user", login_user.strip(), expires_at=datetime.now() + _td(days=7))
-                            except Exception:
-                                pass
+                        try:
+                            _new_token = create_user_session(u["id"])
+                            st.query_params[_SESSION_PARAM] = _new_token
+                        except Exception:
+                            pass
                         st.rerun()
                     elif (login_user or "").strip() or login_pass:
                         st.error("Usuario o contraseña incorrectos.")
@@ -590,11 +592,13 @@ with st.sidebar:
 
 
     if st.button("Cerrar sesión", key="logout_btn", use_container_width=True):
-        if _COOKIES_OK:
-            try:
-                _cookie_mgr.delete("fw_user")
-            except Exception:
-                pass
+        try:
+            _logout_token = st.query_params.get(_SESSION_PARAM, "")
+            if _logout_token:
+                delete_user_session(_logout_token)
+            st.query_params.clear()
+        except Exception:
+            pass
         st.session_state.current_user = None
         st.session_state.selected_fixture_ids = []
         st.rerun()
@@ -1645,8 +1649,11 @@ with main_col:
                     st.caption(f"${PRICE_PER_CREDIT_CLP:,} CLP/análisis · IVA incl.".replace(",", "."))
                     if mp_ok and user_email_credits:
                         if st.button(f"Comprar {pack['credits']} créditos", key=f"pack_btn_{pack['credits']}", use_container_width=True, type="primary"):
+                            _stok = st.query_params.get(_SESSION_PARAM, "")
+                            _base = os.getenv("FORGEWIN_BASE_URL", "https://forgewin.cl")
+                            _bk = f"{_base}?payment=pack&status=ok&t={_stok}" if _stok else None
                             init_point, err = create_preference_for_credits(
-                                u_credits["id"], pack["credits"], user_email_credits
+                                u_credits["id"], pack["credits"], user_email_credits, back_url=_bk
                             )
                             if init_point:
                                 st.session_state[f"pack_link_{pack['credits']}"] = init_point

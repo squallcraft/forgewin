@@ -564,6 +564,71 @@ def init_db() -> None:
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_team_aliases_pair ON pending_team_aliases(league_id, name_variant_1, name_variant_2)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_pending_team_aliases_status ON pending_team_aliases(status)")
 
+        # Sesiones de usuario (token en URL para persistencia cross-reload)
+        c.execute(f"""
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                id {_PK_AUTO},
+                token TEXT UNIQUE NOT NULL,
+                user_id INTEGER NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id)")
+
+
+# ── Sesiones de usuario ──────────────────────────────────────────────────────
+
+def create_user_session(user_id: int, days: int = 7) -> str:
+    """Crea un token de sesión para el usuario. Devuelve el token (UUID)."""
+    import uuid
+    token = uuid.uuid4().hex
+    now = datetime.utcnow()
+    expires = (now + timedelta(days=days)).isoformat()
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO user_sessions (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+            (token, user_id, expires, now.isoformat()),
+        )
+    return token
+
+
+def get_session_user(token: str) -> Optional[Dict[str, Any]]:
+    """Devuelve los datos del usuario asociado al token si es válido y no expiró. None si inválido."""
+    if not token:
+        return None
+    now = datetime.utcnow().isoformat()
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute(
+            """SELECT u.id, u.username, u.email, u.role, u.grok_enabled, u.tier, u.credits_balance
+               FROM user_sessions s
+               JOIN users u ON u.id = s.user_id
+               WHERE s.token = ? AND s.expires_at > ?""",
+            (token, now),
+        )
+        row = c.fetchone()
+        return dict(row) if row else None
+
+
+def delete_user_session(token: str) -> None:
+    """Elimina el token de sesión (logout)."""
+    if not token:
+        return
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM user_sessions WHERE token = ?", (token,))
+
+
+def cleanup_expired_sessions() -> None:
+    """Elimina sesiones expiradas (llamar desde cron o init)."""
+    now = datetime.utcnow().isoformat()
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM user_sessions WHERE expires_at < ?", (now,))
+
 
 def save_error_report(
     user_id: Optional[int] = None,
