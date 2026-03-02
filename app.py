@@ -103,6 +103,17 @@ try:
 except ImportError:
     build_enriched_context_for_matches = None
 
+# ── Persistencia de sesión con cookies ────────────────────────────────────────
+try:
+    import extra_streamlit_components as stx
+    _cookie_mgr = stx.CookieManager(key="fw_cookies")
+    _all_cookies: dict = _cookie_mgr.get_all() or {}
+    _COOKIES_OK = True
+except Exception:
+    _cookie_mgr = None
+    _all_cookies = {}
+    _COOKIES_OK = False
+
 
 def _normalize_and_dedupe_matches(matches: list) -> list:
     """
@@ -411,6 +422,39 @@ def _ensure_session_state():
 
 _ensure_session_state()
 
+# ── Restaurar sesión desde cookie (sobrevive reloads y redirect de MP) ────────
+if st.session_state.current_user is None and _COOKIES_OK:
+    try:
+        _saved_username = _all_cookies.get("fw_user")
+        if _saved_username:
+            _u_cookie = get_user_by_username(_saved_username)
+            if _u_cookie:
+                st.session_state.current_user = {
+                    "id": _u_cookie["id"],
+                    "username": _u_cookie["username"],
+                    "email": _u_cookie.get("email") or "",
+                    "role": _u_cookie.get("role", "user"),
+                    "grok_enabled": bool(_u_cookie.get("grok_enabled")),
+                    "tier": _u_cookie.get("tier") or "base",
+                    "credits_balance": int(_u_cookie.get("credits_balance") or 0),
+                }
+    except Exception as _e:
+        log.warning("Cookie restore error: %s", _e)
+
+# ── Procesar retorno de Mercado Pago (fallback si el webhook falló) ────────────
+_mp_qp = st.query_params
+if _mp_qp.get("status") == "approved" and _mp_qp.get("payment_id"):
+    try:
+        from payment_controller import process_payment_notification
+        _mp_ok, _mp_msg = process_payment_notification(str(_mp_qp.get("payment_id")))
+        if _mp_ok and st.session_state.current_user:
+            _u_fresh = get_user_by_id(st.session_state.current_user["id"])
+            if _u_fresh:
+                st.session_state.current_user["credits_balance"] = int(_u_fresh.get("credits_balance") or 0)
+            st.toast("✅ ¡Pago aprobado! Tus créditos han sido acreditados.", icon="✅")
+    except Exception as _e:
+        log.exception("Error procesando retorno MP: %s", _e)
+
 # ---------- Página de inicio: solo login centrado cuando no hay sesión ----------
 if not st.session_state.current_user:
     # Sidebar mínimo en la página de login
@@ -459,6 +503,12 @@ if not st.session_state.current_user:
                             "role": u.get("role", "user"), "grok_enabled": bool(u.get("grok_enabled")),
                             "tier": u.get("tier") or "base", "credits_balance": int(u.get("credits_balance") or 0),
                         }
+                        if _COOKIES_OK:
+                            try:
+                                from datetime import timedelta as _td
+                                _cookie_mgr.set("fw_user", login_user.strip(), expires_at=datetime.now() + _td(days=7))
+                            except Exception:
+                                pass
                         st.rerun()
                     elif (login_user or "").strip() or login_pass:
                         st.error("Usuario o contraseña incorrectos.")
@@ -540,6 +590,11 @@ with st.sidebar:
 
 
     if st.button("Cerrar sesión", key="logout_btn", use_container_width=True):
+        if _COOKIES_OK:
+            try:
+                _cookie_mgr.delete("fw_user")
+            except Exception:
+                pass
         st.session_state.current_user = None
         st.session_state.selected_fixture_ids = []
         st.rerun()
