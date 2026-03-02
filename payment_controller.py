@@ -199,7 +199,9 @@ def create_preference_for_pack(
         logger.info("payment_controller: respuesta MP status=%s", resp.get("status"))
         if resp.get("status") in (200, 201):
             body = resp.get("response") or {}
-            init_point = body.get("init_point") or body.get("sandbox_init_point")
+            # Preferir init_point (producción). sandbox_init_point solo para tokens TEST-.
+            is_test_token = ACCESS_TOKEN.startswith("TEST-")
+            init_point = body.get("sandbox_init_point" if is_test_token else "init_point") or body.get("init_point")
             if init_point:
                 from db import upsert_mp_payment
                 upsert_mp_payment(
@@ -212,7 +214,7 @@ def create_preference_for_pack(
                     status="pending",
                     mp_preference_id=str(body.get("id", "")),
                 )
-                logger.info("payment_controller: init_point creado OK")
+                logger.info("payment_controller: init_point creado OK (test_mode=%s)", is_test_token)
                 return init_point, ""
         err = resp.get("response") or resp
         msg = str(err.get("message", err) if isinstance(err, dict) else err)
@@ -273,7 +275,8 @@ def create_preference_for_credits(
         resp = sdk.preference().create(preference_data)
         if resp.get("status") in (200, 201):
             body = resp.get("response") or {}
-            init_point = body.get("init_point") or body.get("sandbox_init_point")
+            is_test_token = ACCESS_TOKEN.startswith("TEST-")
+            init_point = body.get("sandbox_init_point" if is_test_token else "init_point") or body.get("init_point")
             if init_point:
                 from db import upsert_mp_payment
                 upsert_mp_payment(
