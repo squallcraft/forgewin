@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: forgewin-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: forgewin
+      POSTGRES_USER: forgewin
+      POSTGRES_PASSWORD: forgewin
+    ports:
+      - "5432:5432"
+    volumes:
+      - forgewin_pg_data:/var/lib/postgresql/data
+
+volumes:
+  forgewin_pg_data:

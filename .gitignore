@@ -1,0 +1,42 @@
+# Secretos y configuración local
+.env
+
+# Bases de datos locales (los datos están en PostgreSQL DO)
+*.db
+*.sqlite
+*.sqlite3
+
+# Entorno virtual
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Reportes PDF generados
+reports/
+*.pdf
+
+# Logs
+logs/
+*.log
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Archivos temporales
+*.tmp
+*.bak

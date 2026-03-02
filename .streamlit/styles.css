@@ -1,0 +1,156 @@
+/* ForgeWin: interfaz oscura, acento azul, tipografía 14-16px */
+:root {
+  --fw-bg-main: #1C1C1E;
+  --fw-bg-sidebar: #121214;
+  --fw-bg-card: #2C2C2E;
+  --fw-bg-input: #3A3A3C;
+  --fw-text: #E0E0E0;
+  --fw-text-muted: #A0A0A0;
+  --fw-accent: #6495ED;
+  --fw-accent-hover: #7B68EE;
+  --fw-border: #3d3d4d;
+  --fw-font-size: 15px;
+  --fw-font-size-sm: 13px;
+  --fw-radius: 10px;
+}
+
+/* Base: tipografía consistente 14-16px */
+.stMarkdown, .stMarkdown p, label, span {
+  font-size: var(--fw-font-size) !important;
+}
+.stCaption {
+  font-size: var(--fw-font-size-sm) !important;
+  color: var(--fw-text-muted) !important;
+}
+
+/* Fondo principal */
+.main .block-container {
+  padding-top: 1.25rem;
+  max-width: 1400px;
+  background-color: var(--fw-bg-main);
+}
+
+/* Sidebar más oscuro */
+[data-testid="stSidebar"] {
+  background: var(--fw-bg-sidebar);
+}
+[data-testid="stSidebar"] .stMarkdown,
+[data-testid="stSidebar"] label {
+  color: var(--fw-text) !important;
+  font-size: var(--fw-font-size) !important;
+}
+
+/* Títulos: sin borde naranja, acento azul suave */
+h1, h2, h3 {
+  color: var(--fw-text) !important;
+  border-bottom: 1px solid var(--fw-border);
+  padding-bottom: 0.35rem;
+  font-size: 1.25rem !important;
+}
+h1 { font-size: 1.5rem !important; }
+h2 { font-size: 1.25rem !important; }
+h3 { font-size: 1.1rem !important; }
+
+/* Botones: texto siempre blanco, acento azul/púrpura */
+.stButton > button,
+.stButton > button *,
+.stButton > button span,
+.stButton > button:hover,
+.stButton > button:hover *,
+.stButton > button:focus,
+.stButton > button:focus *,
+.stButton > button:active,
+.stButton > button:active * {
+  color: #FFFFFF !important;
+}
+.stButton > button {
+  background-color: var(--fw-accent) !important;
+  border: none;
+  border-radius: var(--fw-radius);
+  font-weight: 600;
+  font-size: var(--fw-font-size) !important;
+  padding: 0.5rem 1rem;
+  transition: background 0.2s;
+}
+.stButton > button:hover {
+  background-color: var(--fw-accent-hover) !important;
+  border: none;
+}
+
+/* Barra superior ForgeWin */
+.forgewin-header,
+.forgewin-header *,
+.forgewin-header span,
+.forgewin-header p,
+.forgewin-header a {
+  color: #FFFFFF !important;
+}
+
+/* Métricas */
+[data-testid="stMetricValue"] {
+  color: var(--fw-accent) !important;
+  font-weight: 700;
+  font-size: 1.25rem !important;
+}
+[data-testid="stMetricLabel"] {
+  color: var(--fw-text-muted) !important;
+  font-size: var(--fw-font-size-sm) !important;
+}
+
+/* Alertas */
+[data-testid="stAlert"] div[data-baseweb="notification"] {
+  border-radius: var(--fw-radius);
+  border-left: 4px solid var(--fw-accent);
+}
+
+/* Expanders: fondo card, bordes redondeados */
+[data-testid="stExpander"] {
+  background-color: var(--fw-bg-card);
+  border: 1px solid var(--fw-border);
+  border-radius: var(--fw-radius);
+}
+
+/* Inputs */
+.stTextInput input,
+.stNumberInput input {
+  background-color: var(--fw-bg-input) !important;
+  color: var(--fw-text) !important;
+  border: 1px solid var(--fw-border);
+  border-radius: 8px;
+  font-size: var(--fw-font-size) !important;
+}
+
+[data-testid="stSelectbox"] div {
+  background-color: var(--fw-bg-input) !important;
+  color: var(--fw-text) !important;
+  border-radius: 8px;
+}
+
+[data-testid="stRadio"] label {
+  color: var(--fw-text) !important;
+  font-size: var(--fw-font-size) !important;
+}
+
+/* Párrafos y caption */
+p, .stCaption {
+  color: var(--fw-text-muted) !important;
+  font-size: var(--fw-font-size) !important;
+}
+
+/* Separadores */
+hr {
+  border-color: var(--fw-border) !important;
+}
+
+/* Dataframe */
+[data-testid="stDataFrame"] {
+  border-radius: var(--fw-radius);
+  overflow: hidden;
+  border: 1px solid var(--fw-border);
+}
+
+/* Checkbox y controles */
+[data-testid="stCheckbox"] label {
+  color: var(--fw-text) !important;
+  font-size: var(--fw-font-size) !important;
+}

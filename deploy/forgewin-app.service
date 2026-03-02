@@ -1,0 +1,21 @@
+[Unit]
+Description=ForgeWin Streamlit App
+After=network.target
+
+[Service]
+User=forgewin
+Group=forgewin
+WorkingDirectory=/opt/forgewin
+EnvironmentFile=/opt/forgewin/.env
+ExecStart=/opt/forgewin/venv/bin/streamlit run app.py \
+    --server.port=8501 \
+    --server.address=127.0.0.1 \
+    --server.headless=true \
+    --browser.gatherUsageStats=false
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

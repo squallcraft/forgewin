@@ -1,0 +1,10 @@
+# ForgeWin: tema oscuro, acento azul/púrpura, tipografía limpia
+[theme]
+primaryColor = "#6495ED"
+backgroundColor = "#1C1C1E"
+secondaryBackgroundColor = "#2C2C2E"
+textColor = "#E0E0E0"
+font = "sans serif"
+
+[server]
+headless = true

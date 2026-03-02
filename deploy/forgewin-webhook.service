@@ -1,0 +1,19 @@
+[Unit]
+Description=ForgeWin Webhook Server (Mercado Pago)
+After=network.target
+
+[Service]
+User=forgewin
+Group=forgewin
+WorkingDirectory=/opt/forgewin
+EnvironmentFile=/opt/forgewin/.env
+ExecStart=/opt/forgewin/venv/bin/uvicorn webhook_server:app \
+    --host=127.0.0.1 \
+    --port=8502
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

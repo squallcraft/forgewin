@@ -1,0 +1,24 @@
+# Crontab de producción (ForgeWin / football-betting-analysis)
+# Configurar TZ=America/Santiago en el sistema para horario Chile.
+# Ajustar PROJECT_DIR y PYTHON_PATH a tu entorno.
+#
+# Antes de instalar:
+#   mkdir -p /ruta/al/proyecto/logs
+#
+# Instalación:
+#   crontab cron/crontab.production.example
+
+PROJECT_DIR=/ruta/al/football-betting-analysis
+PYTHON_PATH=/usr/bin/python3
+
+# --- DIARIO: actualización completa (partidos nuevos + backfills) ---
+# 02:00 Chile - sync + estadísticas, tarjetas, offsides, attendance, xG
+0 2 * * * cd $PROJECT_DIR && $PYTHON_PATH scripts/run_production_daily.py >> $PROJECT_DIR/logs/production_daily.log 2>&1
+
+# --- DIARIO: revisión de completitud (detecta gaps, guarda en data_completeness_log) ---
+# 03:00 Chile
+0 3 * * * cd $PROJECT_DIR && $PYTHON_PATH scripts/check_data_completeness.py --log-to-db >> $PROJECT_DIR/logs/check_completeness.log 2>&1
+
+# --- SEMANAL: ventana rolling (elimina temporadas antiguas) ---
+# Lunes y jueves 05:00 Chile
+0 5 * * 1,4 cd $PROJECT_DIR && $PYTHON_PATH manage.py maintain_rolling_window >> $PROJECT_DIR/logs/rolling_window.log 2>&1
