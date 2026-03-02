@@ -57,7 +57,15 @@ if _DB_MODE == "pg":
 
         def execute(self, sql: str, params=None):
             sql_pg = sql.replace("?", "%s")
-            self._c.execute(sql_pg, _pg_clean_params(params))
+            # SAVEPOINTs: evitan que un error individual aborte toda la transacción PG
+            self._c.execute("SAVEPOINT _fw_sp")
+            try:
+                self._c.execute(sql_pg, _pg_clean_params(params))
+                self._c.execute("RELEASE SAVEPOINT _fw_sp")
+            except Exception:
+                self._c.execute("ROLLBACK TO SAVEPOINT _fw_sp")
+                self._c.execute("RELEASE SAVEPOINT _fw_sp")
+                raise
             if sql_pg.lstrip().upper().startswith("INSERT"):
                 try:
                     self._c.execute("SELECT LASTVAL()")
@@ -1121,8 +1129,8 @@ def upsert_mp_payment(
             """INSERT INTO mp_payments (user_id, mp_payment_id, mp_preference_id, external_reference, tier, credits, amount, currency_id, status, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(external_reference) DO UPDATE SET
-                   mp_payment_id = CASE WHEN ? != '' THEN ? ELSE mp_payment_id END,
-                   mp_preference_id = CASE WHEN ? != '' THEN ? ELSE mp_preference_id END,
+                   mp_payment_id = CASE WHEN ? != '' THEN ? ELSE mp_payments.mp_payment_id END,
+                   mp_preference_id = CASE WHEN ? != '' THEN ? ELSE mp_payments.mp_preference_id END,
                    status = ?,
                    updated_at = ?""",
             (user_id, pid, pref, external_reference, tier, credits, amount, currency_id, status, now, now, pid, pid, pref, pref, status, now),
