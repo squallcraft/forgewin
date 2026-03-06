@@ -3,7 +3,7 @@ Sincronización: API-Sports como fuente principal, football-data.org como secund
 Guardar partidos en BD y actualizar resultados al día siguiente.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 import requests
@@ -61,7 +61,7 @@ def fetch_and_store_matches(league_codes: List[str], days_ahead: int = 3) -> Lis
     Obtiene próximos partidos: primero API-Sports, si no hay datos usa football-data.org.
     Para EL, CL, CLI usa ventana extendida (60 días).
     """
-    today = datetime.utcnow().date()
+    today = datetime.now(timezone.utc).date()
     date_from_str = today.isoformat()
     all_matches: List[Dict] = []
     CUP_MIN_DAYS = 60
@@ -130,7 +130,7 @@ def fetch_finished_results(league_codes: List[str], days_back: int = 1) -> int:
     Actualiza resultados: primero API-Sports, luego football-data.org.
     Devuelve número de partidos actualizados.
     """
-    today = datetime.utcnow().date()
+    today = datetime.now(timezone.utc).date()
     date_from = today - timedelta(days=days_back)
     date_to = today
     date_from_str = date_from.isoformat()
