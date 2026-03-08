@@ -33,6 +33,10 @@ from typing import Optional
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# Cargar variables de entorno ANTES de importar cualquier módulo del proyecto
+from dotenv import load_dotenv
+load_dotenv(ROOT / ".env")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",

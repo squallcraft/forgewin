@@ -13,6 +13,10 @@ from typing import Optional
 # Asegurar que el proyecto esté en el path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# Cargar variables de entorno ANTES de importar cualquier módulo del proyecto
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 from data_downloader import update_from_apisports
 from rolling_window import maintain_rolling_window
 

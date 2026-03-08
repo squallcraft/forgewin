@@ -14,6 +14,11 @@ from pathlib import Path
 # Raíz del proyecto
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# Cargar variables de entorno ANTES de importar cualquier módulo del proyecto
+# (db.py lee DATABASE_URL al importarse; si no está cargado cae a SQLite vacío)
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
