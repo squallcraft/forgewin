@@ -831,32 +831,11 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Indicadores de acierto (recuadros superiores)
-try:
-    acc = get_accuracy_stats()
-    if acc["matches_evaluated"] > 0:
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            st.metric("Acierto global propuestas", f"{acc['proposals']['pct']}%", f"{acc['proposals']['hits']}/{acc['proposals']['total']}")
-        with c2:
-            poco = acc.get("by_risk", {}).get("poco", {})
-            st.metric("Poco riesgo", f"{poco.get('pct', 0)}%", f"{poco.get('hits', 0)}/{poco.get('total', 0)}" if poco else "—")
-        with c3:
-            mod = acc.get("by_risk", {}).get("moderado", {})
-            st.metric("Moderado", f"{mod.get('pct', 0)}%", f"{mod.get('hits', 0)}/{mod.get('total', 0)}" if mod else "—")
-        with c4:
-            arr = acc.get("by_risk", {}).get("arriesgada", {})
-            st.metric("Arriesgada", f"{arr.get('pct', 0)}%", f"{arr.get('hits', 0)}/{arr.get('total', 0)}" if arr else "—")
-        st.markdown("---")
-except Exception:
-    pass
-
 with st.expander("¿Cómo usar?"):
     st.markdown("""
     1. **Partidos del día:** partidos de hoy (o mañana). Marca hasta 10 partidos y pulsa **Consultar propuesta** para generar un análisis (Alfred o Reginald) y recomendación. Puedes descargar PDF.
     2. **Competencias (izquierda):** haz clic en una liga para ver sus próximos partidos con probabilidades.
     3. **Buscar propuesta:** introduce el ID de una propuesta para verla y comparar con el resultado real.
-    4. Los **indicadores de arriba** muestran el nivel de acierto de las propuestas.
     """)
 
 
@@ -1775,6 +1754,8 @@ with main_col:
                 by_league = defaultdict(list)
                 for row in display_rows:
                     by_league[row.get("league") or "Otros"].append(row)
+                for _k in by_league:
+                    by_league[_k].sort(key=lambda r: (str(r.get("date") or ""), r.get("fixture_id") or 0))
                 ligas_orden = sorted(by_league.keys())
                 MAX_SELECT = 10
                 st.caption(f"Próximos 7 días. Selecciona hasta {MAX_SELECT} partidos para generar una propuesta.")
@@ -1813,7 +1794,7 @@ with main_col:
                         fid = row.get("fixture_id")
                         c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13 = st.columns([0.04, 0.09, 0.09, 0.06, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.04, 0.04])
                         with c0:
-                            st.checkbox("", value=(fid in st.session_state.get("selected_fixture_ids", [])), key=f"sel_up_{fid}_{liga_nombre}_{idx_row}", disabled=True)
+                            st.checkbox("", value=(fid in st.session_state.get("selected_fixture_ids", [])), key=f"sel_up_{fid}_{liga_nombre}", disabled=True)
                         c1.write(row.get("home", ""))
                         c2.write(row.get("away", ""))
                         dia_mes_ano, hora_min = format_date_chile(row.get("date"))
@@ -1979,6 +1960,8 @@ with main_col:
                 by_league = defaultdict(list)
                 for row in display_rows:
                     by_league[row.get("league") or "Otros"].append(row)
+                for _k in by_league:
+                    by_league[_k].sort(key=lambda r: (str(r.get("date") or ""), r.get("fixture_id") or 0))
                 ligas_orden = sorted(by_league.keys())
                 checked_fids = []
                 all_fids_display = [r.get("fixture_id") for r in display_rows if r.get("fixture_id")]
@@ -2027,7 +2010,7 @@ with main_col:
                                 row_show.update(grok_stats[fid])
                             c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13 = st.columns([0.03, 0.08, 0.08, 0.06, 0.05, 0.045, 0.045, 0.045, 0.045, 0.045, 0.045, 0.045, 0.04, 0.035])
                             with c0:
-                                cb = st.checkbox("", value=(fid in st.session_state.selected_fixture_ids), key=f"sel_{fid}_{liga_nombre}_{idx_row}", help="Incluir")
+                                cb = st.checkbox("", value=(fid in st.session_state.selected_fixture_ids), key=f"sel_{fid}_{liga_nombre}", help="Incluir")
                                 if cb and fid not in checked_fids:
                                     checked_fids.append(fid)
                             c1.write(row_show.get("home", ""))
@@ -2465,6 +2448,8 @@ with main_col:
             by_league_v3 = defaultdict(list)
             for row in display_rows_v3:
                 by_league_v3[row.get("league") or "Otros"].append(row)
+            for _k in by_league_v3:
+                by_league_v3[_k].sort(key=lambda r: (str(r.get("date") or ""), r.get("fixture_id") or 0))
             ligas_orden_v3 = sorted(by_league_v3.keys())
             MAX_SELECT_V3 = 10
             if "v3_selected_fixture_ids" not in st.session_state:
@@ -2506,7 +2491,7 @@ with main_col:
                         row_show_v3 = dict(row)
                         c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13 = st.columns([0.03, 0.08, 0.08, 0.06, 0.05, 0.045, 0.045, 0.045, 0.045, 0.045, 0.045, 0.045, 0.04, 0.035])
                         with c0:
-                            cb = st.checkbox("", value=(fid in st.session_state["v3_selected_fixture_ids"]), key=f"v3_sel_{fid}_{liga_nombre_v3}_{idx_row}", help="Incluir")
+                            cb = st.checkbox("", value=(fid in st.session_state["v3_selected_fixture_ids"]), key=f"v3_sel_{fid}_{liga_nombre_v3}", help="Incluir")
                             if cb and fid not in checked_fids_v3:
                                 checked_fids_v3.append(fid)
                         c1.write(row_show_v3.get("home", ""))
@@ -2842,6 +2827,8 @@ with main_col:
             by_league_v2 = defaultdict(list)
             for row in display_rows_v2_full:
                 by_league_v2[row.get("league") or "Otros"].append(row)
+            for _k in by_league_v2:
+                by_league_v2[_k].sort(key=lambda r: (str(r.get("date") or ""), r.get("fixture_id") or 0))
             ligas_orden_v2 = sorted(by_league_v2.keys())
             MAX_SELECT_V2 = 10
             checked_fids_v2 = []
@@ -2894,7 +2881,7 @@ with main_col:
                             row_show.update(grok_stats_v2[fid])
                         c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13 = st.columns([0.03, 0.08, 0.08, 0.06, 0.05, 0.045, 0.045, 0.045, 0.045, 0.045, 0.045, 0.045, 0.04, 0.035])
                         with c0:
-                            cb = st.checkbox("", value=(fid in st.session_state.selected_fixture_ids), key=f"v2_sel_{fid}_{liga_nombre}_{idx_row}", help="Incluir")
+                            cb = st.checkbox("", value=(fid in st.session_state.selected_fixture_ids), key=f"v2_sel_{fid}_{liga_nombre}", help="Incluir")
                             if cb and fid not in checked_fids_v2:
                                 checked_fids_v2.append(fid)
                         c1.write(row_show.get("home", ""))

@@ -803,7 +803,7 @@ def get_matches_by_local_date(
         c.execute(
             f"""SELECT * FROM matches
                 WHERE {date_expr} >= ? AND {date_expr} < ? AND league_code IN ({placeholders})
-                ORDER BY {date_expr}""",
+                ORDER BY {date_expr}, fixture_id""",
             [start_str, end_str] + list(league_codes)
         )
         rows = c.fetchall()
@@ -844,7 +844,7 @@ def get_upcoming_matches_from_db(league_codes: List[str], days_ahead: int = 3) -
             f"""SELECT * FROM matches
                 WHERE {date_expr} >= ? AND {date_expr} <= ? AND league_code IN ({placeholders})
                 AND (status = 'SCHEDULED' OR status IS NULL)
-                ORDER BY {date_expr}""",
+                ORDER BY {date_expr}, fixture_id""",
             [start_str, end_str] + list(league_codes)
         )
         return [_row_to_dict(r) for r in c.fetchall()]
