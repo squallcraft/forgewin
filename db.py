@@ -851,7 +851,7 @@ def get_upcoming_matches_from_db(league_codes: List[str], days_ahead: int = 3) -
 
 
 def update_match_result(fixture_id: int, home_goals: int, away_goals: int) -> None:
-    """Actualiza resultado de un partido (y tabla match_results)."""
+    """Actualiza resultado de un partido (y tabla match_results si el fixture existe)."""
     now = datetime.utcnow().isoformat()
     with get_connection() as conn:
         c = conn.cursor()
@@ -859,10 +859,12 @@ def update_match_result(fixture_id: int, home_goals: int, away_goals: int) -> No
             "UPDATE matches SET status = 'FINISHED', home_goals = ?, away_goals = ?, updated_at = ? WHERE fixture_id = ?",
             (home_goals, away_goals, now, fixture_id)
         )
-        c.execute(
-            "INSERT INTO match_results (fixture_id, home_goals, away_goals, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(fixture_id) DO UPDATE SET home_goals=?, away_goals=?, updated_at=?",
-            (fixture_id, home_goals, away_goals, now, home_goals, away_goals, now)
-        )
+        c.execute("SELECT 1 FROM matches WHERE fixture_id = ?", (fixture_id,))
+        if c.fetchone():
+            c.execute(
+                "INSERT INTO match_results (fixture_id, home_goals, away_goals, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(fixture_id) DO UPDATE SET home_goals=?, away_goals=?, updated_at=?",
+                (fixture_id, home_goals, away_goals, now, home_goals, away_goals, now)
+            )
 
 
 def _row_to_dict(row) -> Dict[str, Any]:
