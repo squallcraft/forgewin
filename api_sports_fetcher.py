@@ -76,18 +76,17 @@ def _api_get(endpoint: str, params: Optional[Dict[str, Any]] = None) -> Optional
 
 def _season_from_date(date_str: str, league_code: str = "") -> int:
     """
-    Año de temporada según tipo de competición (año en que termina la temporada).
-    Europeas (PL, SA, CL, EL, etc.): ago-may (ej. feb 2026 = 2025/26 → season 2026).
-    Sudamericanas (CLI): año civil (ej. feb 2026 = season 2026).
+    Año de temporada para API-Sports (usa el año de INICIO de temporada).
+    Europeas (PL, SA, CL, EL, etc.): ago-may → API-Sports usa año de inicio.
+    Sudamericanas (CLI): año civil.
     """
     year = int(date_str[:4])
     if league_code == "CLI":
-        return year  # Copa Libertadores usa año civil
+        return year
     month = int(date_str[5:7]) if len(date_str) >= 7 else 7
-    # Europeas: ago (mes 8) inicia temporada que termina en year+1
     if month >= 8:
-        return year + 1  # ej. 2025-08 → temporada 2025/26 → 2026
-    return year  # ej. 2026-02 → temporada 2025/26 → 2026
+        return year      # ago-dic: temporada inicia este año (2025-08 → season 2025)
+    return year - 1  # ene-jul: temporada inició el año pasado (2026-03 → season 2025)
 
 
 def get_fixtures(
