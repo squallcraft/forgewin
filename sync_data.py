@@ -180,8 +180,12 @@ def maintain_historical_rolling_window(dry_run: bool = False) -> int:
 
 
 if __name__ == "__main__":
-    """Sincroniza partidos desde API a la BD (para Partidos del día)."""
+    """Sincroniza partidos y actualiza resultados de partidos finalizados."""
     from config import TOP_10_LEAGUE_CODES
     print("Sincronizando partidos (top 10 ligas, próximos 3 días)...")
     matches = fetch_and_store_matches(TOP_10_LEAGUE_CODES, days_ahead=3)
     print(f"✓ {len(matches)} partidos guardados en BD.")
+
+    print("Actualizando resultados (últimos 3 días)...")
+    updated = fetch_finished_results(TOP_10_LEAGUE_CODES, days_back=3)
+    print(f"✓ {updated} resultados actualizados.")
